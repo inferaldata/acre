@@ -10,7 +10,7 @@ from typing import Literal
 import yaml
 
 from acre.models.comment import Comment, CommentCategory
-from acre.models.review import FileReviewState, ReviewSession
+from acre.models.review import FileReviewState, ResolvedHunk, ReviewSession
 
 
 @lru_cache(maxsize=1)
@@ -222,6 +222,21 @@ def session_to_dict(session: ReviewSession) -> dict:
                     }
                     for c in state.comments
                 ],
+                "resolved_hunks": [
+                    {
+                        "hunk_id": rh.hunk_id,
+                        "file_path": rh.file_path,
+                        "old_start": rh.old_start,
+                        "old_count": rh.old_count,
+                        "new_start": rh.new_start,
+                        "new_count": rh.new_count,
+                        "header": rh.header,
+                        "lines_preview": LiteralStr(rh.lines_preview) if rh.lines_preview else "",
+                        "resolved_at": rh.resolved_at.isoformat(),
+                        "resolved_by": rh.resolved_by,
+                    }
+                    for rh in state.resolved_hunks
+                ],
             }
             for path, state in session.files.items()
         },
@@ -285,10 +300,34 @@ def session_from_dict(data: dict, repo_path: Path) -> ReviewSession:
             comment = Comment(**comment_kwargs)
             comments.append(comment)
 
+        # Load resolved hunks
+        resolved_hunks = []
+        for rh_data in file_data.get("resolved_hunks", []):
+            resolved_at = (
+                datetime.fromisoformat(rh_data["resolved_at"])
+                if rh_data.get("resolved_at")
+                else datetime.now()
+            )
+            resolved_hunks.append(
+                ResolvedHunk(
+                    hunk_id=rh_data["hunk_id"],
+                    file_path=rh_data.get("file_path", path),
+                    old_start=rh_data["old_start"],
+                    old_count=rh_data["old_count"],
+                    new_start=rh_data["new_start"],
+                    new_count=rh_data["new_count"],
+                    header=rh_data.get("header", ""),
+                    lines_preview=rh_data.get("lines_preview", ""),
+                    resolved_at=resolved_at,
+                    resolved_by=rh_data.get("resolved_by", "human"),
+                )
+            )
+
         state = FileReviewState(
             file_path=file_data["file_path"],
             reviewed=file_data.get("reviewed", False),
             comments=comments,
+            resolved_hunks=resolved_hunks,
         )
         session.files[path] = state
 

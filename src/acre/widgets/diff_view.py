@@ -107,21 +107,31 @@ class DiffView(VerticalScroll):
         self._build_line_index()
 
     def _build_line_index(self) -> None:
-        """Build a flat index of all diff lines for navigation."""
+        """Build a flat index of all diff lines for navigation, excluding resolved hunks."""
         self._all_lines = []
         for file_idx, file in enumerate(self.diff_set.files):
             if not file.is_binary:
+                file_state = self.session.files.get(file.path)
                 for hunk_idx, hunk in enumerate(file.hunks):
+                    # Skip resolved hunks
+                    hunk_id = hunk.get_id(file.path)
+                    if file_state and file_state.is_hunk_resolved(hunk_id):
+                        continue
                     for line in hunk.lines:
                         self._all_lines.append((file_idx, hunk_idx, line))
 
     def _get_file_lines(self, file_index: int) -> list[DiffLine]:
-        """Get all diff lines for a specific file."""
+        """Get all diff lines for a specific file, excluding resolved hunks."""
         lines = []
         if 0 <= file_index < len(self.diff_set.files):
             file = self.diff_set.files[file_index]
             if not file.is_binary:
+                file_state = self.session.files.get(file.path)
                 for hunk in file.hunks:
+                    # Skip resolved hunks
+                    hunk_id = hunk.get_id(file.path)
+                    if file_state and file_state.is_hunk_resolved(hunk_id):
+                        continue
                     lines.extend(hunk.lines)
         return lines
 
@@ -205,6 +215,46 @@ class DiffView(VerticalScroll):
 
         return start <= line_index <= end
 
+    def get_selected_hunks(self) -> list[tuple[int, DiffHunk]]:
+        """Get hunks that overlap with the current visual selection.
+
+        Returns list of (hunk_idx, hunk) tuples for hunks touched by selection.
+        """
+        if not self._visual_mode or not self.current_file:
+            return []
+
+        start_line, end_line = self.selection_range
+        if start_line is None or end_line is None:
+            return []
+
+        affected_hunks = []
+        file_state = self.session.files.get(self.current_file.path)
+
+        for hunk_idx, hunk in enumerate(self.current_file.hunks):
+            # Skip already resolved hunks
+            hunk_id = hunk.get_id(self.current_file.path)
+            if file_state and file_state.is_hunk_resolved(hunk_id):
+                continue
+
+            # Get line numbers for this hunk
+            hunk_lines = [l.line_no for l in hunk.lines if l.line_no is not None]
+            if not hunk_lines:
+                continue
+            hunk_start, hunk_end = min(hunk_lines), max(hunk_lines)
+
+            # Check if selection overlaps with hunk
+            if start_line <= hunk_end and end_line >= hunk_start:
+                affected_hunks.append((hunk_idx, hunk))
+
+        return affected_hunks
+
+    def clear_selection(self) -> None:
+        """Clear visual selection without triggering cancel action."""
+        self._visual_mode = False
+        self._visual_anchor_index = None
+        self.refresh_current_file()
+        self._notify_selection_changed()
+
     def compose(self):
         """Render only the current file."""
         if self.diff_set.files:
@@ -252,7 +302,13 @@ class DiffView(VerticalScroll):
             lines.append("[dim]Binary file[/dim]")
         else:
             line_idx = 0  # Track line index for selection highlighting
+            rendered_any_hunk = False
             for hunk in file.hunks:
+                # Skip resolved hunks
+                hunk_id = hunk.get_id(file.path)
+                if file_state and file_state.is_hunk_resolved(hunk_id):
+                    continue
+                rendered_any_hunk = True
                 # Hunk header - escape header content
                 hunk_info = f"@@ -{hunk.old_start},{hunk.old_count} +{hunk.new_start},{hunk.new_count} @@"
                 if hunk.header:
@@ -279,6 +335,9 @@ class DiffView(VerticalScroll):
                                 lines.append(self._format_inline_comment(comment))
 
                     line_idx += 1
+
+            if not rendered_any_hunk:
+                lines.append("[dim italic]All hunks in this file have been resolved[/dim italic]")
 
         lines.append("")  # Blank line between files
 

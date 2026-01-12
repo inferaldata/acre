@@ -10,11 +10,13 @@ from acre.core.session import save_session
 from acre.models.comment import Comment
 from acre.models.diff import DiffSet
 from acre.models.review import ReviewSession
+from acre.core.session import get_git_user
 from acre.widgets.comment_input import CommentCancelled, CommentDeleted, CommentInput, CommentSubmitted
 from acre.widgets.comment_panel import CommentPanel, CommentSelected
 from acre.widgets.diff_view import DiffView
 from acre.widgets.file_list import FileList, FileSelected, FileReviewToggled
 from acre.widgets.llm_sidebar import LLMSidebar
+from acre.widgets.resolved_panel import HunkResurrected, ResolvedPanel
 from acre.widgets.splitter import VerticalSplitter
 from acre.widgets.status_bar import StatusBar
 
@@ -53,6 +55,8 @@ class MainScreen(Screen):
         Binding("tab", "toggle_panel", "Toggle Panel", show=False),
         Binding("p", "toggle_comments", "Comments", show=True),
         Binding("`", "toggle_llm", "LLM", key_display="`", show=False),
+        # Hunk resolution
+        Binding("-", "resolve_or_toggle", "Resolve", key_display="-", show=True),
         # LLM actions
         Binding("a", "analyze", "Analyze", show=False),
         # Semantic mode
@@ -91,6 +95,14 @@ class MainScreen(Screen):
         display: none;
     }
 
+    #resolved-panel {
+        width: 40;
+        min-width: 30;
+        max-width: 60;
+        border-left: solid $success;
+        display: none;
+    }
+
     #status-bar {
         dock: bottom;
         height: 1;
@@ -110,6 +122,7 @@ class MainScreen(Screen):
         self._show_file_panel = True
         self._show_comment_panel = False
         self._show_llm_panel = False
+        self._show_resolved_panel = False
         self._semantic_mode = semantic_mode
 
     def compose(self) -> ComposeResult:
@@ -129,6 +142,10 @@ class MainScreen(Screen):
             yield CommentPanel(
                 session=self.session,
                 id="comment-panel",
+            )
+            yield ResolvedPanel(
+                session=self.session,
+                id="resolved-panel",
             )
             yield LLMSidebar(id="llm-panel")
         yield StatusBar(session=self.session, id="status-bar")
@@ -153,6 +170,11 @@ class MainScreen(Screen):
     def llm_panel(self) -> LLMSidebar:
         """Get the LLM sidebar widget."""
         return self.query_one("#llm-panel", LLMSidebar)
+
+    @property
+    def resolved_panel(self) -> ResolvedPanel:
+        """Get the resolved panel widget."""
+        return self.query_one("#resolved-panel", ResolvedPanel)
 
     # Navigation actions - delegate to diff view
     def action_scroll_down(self) -> None:
@@ -450,6 +472,83 @@ class MainScreen(Screen):
         llm_panel = self.query_one("#llm-panel")
         self._show_llm_panel = not self._show_llm_panel
         llm_panel.display = self._show_llm_panel
+
+    def action_resolve_or_toggle(self) -> None:
+        """Resolve selected hunks, or toggle resolved panel if no selection."""
+        if self.diff_view.visual_mode:
+            # Resolve selected hunks
+            self._resolve_selected_hunks()
+        else:
+            # Toggle resolved panel
+            self._toggle_resolved_panel()
+
+    def _toggle_resolved_panel(self) -> None:
+        """Toggle resolved panel visibility."""
+        resolved_panel = self.query_one("#resolved-panel")
+        self._show_resolved_panel = not self._show_resolved_panel
+        resolved_panel.display = self._show_resolved_panel
+        if self._show_resolved_panel:
+            self.resolved_panel.refresh_resolved()
+            self.resolved_panel.focus()
+
+    def _resolve_selected_hunks(self) -> None:
+        """Mark selected hunks as resolved."""
+        from acre.models.review import ResolvedHunk
+
+        current_file = self.diff_view.current_file
+        if not current_file:
+            return
+
+        selected_hunks = self.diff_view.get_selected_hunks()
+        if not selected_hunks:
+            self.notify("No hunks in selection", severity="warning")
+            return
+
+        file_state = self.session.get_file_state(current_file.path)
+        resolved_count = 0
+
+        for hunk_idx, hunk in selected_hunks:
+            hunk_id = hunk.get_id(current_file.path)
+            if not file_state.is_hunk_resolved(hunk_id):
+                # Create preview from first 3 lines
+                preview_lines = []
+                for line in hunk.lines[:3]:
+                    prefix = "+" if line.line_type.value == "addition" else "-" if line.line_type.value == "deletion" else " "
+                    preview_lines.append(f"{prefix}{line.content}")
+
+                resolved = ResolvedHunk(
+                    hunk_id=hunk_id,
+                    file_path=current_file.path,
+                    old_start=hunk.old_start,
+                    old_count=hunk.old_count,
+                    new_start=hunk.new_start,
+                    new_count=hunk.new_count,
+                    header=hunk.header,
+                    lines_preview="\n".join(preview_lines),
+                    resolved_by=get_git_user(),
+                )
+                file_state.resolve_hunk(resolved)
+                resolved_count += 1
+
+        if resolved_count > 0:
+            self.diff_view.clear_selection()
+            self.diff_view._build_line_index()  # Rebuild to exclude resolved
+            self.diff_view.refresh_current_file()
+            self._auto_save()
+
+            plural = "s" if resolved_count > 1 else ""
+            self.notify(f"Resolved {resolved_count} hunk{plural}")
+
+    def on_hunk_resurrected(self, event: HunkResurrected) -> None:
+        """Handle hunk resurrection from resolved panel."""
+        file_state = self.session.files.get(event.file_path)
+        if file_state and file_state.unresolve_hunk(event.hunk_id):
+            # Rebuild diff view to show resurrected hunk
+            self.diff_view._build_line_index()
+            self.diff_view.refresh_current_file()
+            self.resolved_panel.refresh_resolved()
+            self._auto_save()
+            self.notify("Hunk resurrected")
 
     def action_analyze(self) -> None:
         """Analyze current file with Claude."""

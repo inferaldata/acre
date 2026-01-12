@@ -1,5 +1,6 @@
 """Diff data models - wrappers around unidiff types."""
 
+import hashlib
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal
@@ -48,6 +49,17 @@ class DiffHunk:
     new_count: int
     header: str
     lines: list[DiffLine] = field(default_factory=list)
+
+    def get_id(self, file_path: str) -> str:
+        """Generate a stable identifier for this hunk.
+
+        Uses position info plus first few lines of content for uniqueness.
+        """
+        content = f"{self.old_start}:{self.old_count}:{self.new_start}:{self.new_count}"
+        for line in self.lines[:3]:
+            content += line.content
+        hash_part = hashlib.md5(content.encode()).hexdigest()[:12]
+        return f"{file_path}::{hash_part}"
 
     @classmethod
     def from_unidiff(cls, hunk: Hunk) -> "DiffHunk":

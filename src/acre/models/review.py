@@ -10,12 +10,29 @@ from acre.models.comment import Comment
 
 
 @dataclass
+class ResolvedHunk:
+    """A hunk that has been marked as resolved (hidden from diff view)."""
+
+    hunk_id: str
+    file_path: str
+    old_start: int
+    old_count: int
+    new_start: int
+    new_count: int
+    header: str
+    lines_preview: str = ""
+    resolved_at: datetime = field(default_factory=datetime.now)
+    resolved_by: str = "human"
+
+
+@dataclass
 class FileReviewState:
     """Review state for a single file."""
 
     file_path: str
     reviewed: bool = False
     comments: list[Comment] = field(default_factory=list)
+    resolved_hunks: list[ResolvedHunk] = field(default_factory=list)
 
     @property
     def comment_count(self) -> int:
@@ -33,6 +50,23 @@ class FileReviewState:
                 self.comments.pop(i)
                 return True
         return False
+
+    def resolve_hunk(self, resolved: ResolvedHunk) -> None:
+        """Add a resolved hunk, avoiding duplicates."""
+        if not any(rh.hunk_id == resolved.hunk_id for rh in self.resolved_hunks):
+            self.resolved_hunks.append(resolved)
+
+    def unresolve_hunk(self, hunk_id: str) -> bool:
+        """Remove a hunk from resolved list. Returns True if found."""
+        for i, rh in enumerate(self.resolved_hunks):
+            if rh.hunk_id == hunk_id:
+                self.resolved_hunks.pop(i)
+                return True
+        return False
+
+    def is_hunk_resolved(self, hunk_id: str) -> bool:
+        """Check if a hunk is resolved."""
+        return any(rh.hunk_id == hunk_id for rh in self.resolved_hunks)
 
 
 @dataclass
