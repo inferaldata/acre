@@ -6,7 +6,7 @@ import click
 
 from acre.app import AcreApp
 from acre.core.diff_source import get_diff_source
-from acre.core.session import load_session, save_session
+from acre.core.session import get_session_path, load_session, save_session
 from acre.models.review import ReviewSession
 
 
@@ -91,7 +91,14 @@ def cli(
 
     # Check for existing session file
     session = None
-    session_file = repo_path / ".acre-review.yaml"
+
+    # Create a temporary session to compute the expected file path
+    temp_session = ReviewSession(
+        repo_path=repo_path,
+        diff_source_type=source_type,
+        diff_source_ref=source_ref,
+    )
+    session_file = get_session_path(temp_session)
 
     if session_file.exists() and not new:
         try:

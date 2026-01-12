@@ -163,10 +163,26 @@ IMPORTANT
 def get_session_path(session: ReviewSession) -> Path:
     """Get the path for storing a session.
 
-    Sessions are stored directly in the repo as .acre-review.yaml
+    Sessions are stored directly in the repo as .acre-review[.<ref>].yaml
     for easy access by LLMs.
+
+    Naming convention:
+    - Default (uncommitted, staged, branch): .acre-review.yaml
+    - commit (-c): .acre-review.<commit>.yaml
+    - pr (--pr): .acre-review.pr-<number>.yaml
     """
-    return session.repo_path / ".acre-review.yaml"
+    base = ".acre-review"
+
+    if session.diff_source_type == "commit" and session.diff_source_ref:
+        # Use short commit hash if full hash provided
+        ref = session.diff_source_ref[:7] if len(session.diff_source_ref) > 7 else session.diff_source_ref
+        suffix = f".{ref}"
+    elif session.diff_source_type == "pr" and session.diff_source_ref:
+        suffix = f".pr-{session.diff_source_ref}"
+    else:
+        suffix = ""
+
+    return session.repo_path / f"{base}{suffix}.yaml"
 
 
 def session_to_dict(session: ReviewSession) -> dict:
@@ -388,7 +404,7 @@ def find_latest_session(
 ) -> ReviewSession | None:
     """Find the session for a repo.
 
-    Sessions are stored as .acre-review.yaml in the repo root.
+    Sessions are stored as .acre-review[.<ref>].yaml in the repo root.
 
     Args:
         repo_path: Repository path
@@ -398,7 +414,13 @@ def find_latest_session(
     Returns:
         The session if found and matches filters, or None
     """
-    session_path = repo_path / ".acre-review.yaml"
+    # Create a temporary session to compute the expected path
+    temp_session = ReviewSession(
+        repo_path=repo_path,
+        diff_source_type=diff_source_type or "uncommitted",
+        diff_source_ref=diff_source_ref,
+    )
+    session_path = get_session_path(temp_session)
 
     if not session_path.exists():
         return None
