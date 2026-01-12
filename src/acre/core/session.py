@@ -39,7 +39,12 @@ def get_git_user() -> str:
         return "human"
 
 
-# Custom YAML representer for literal block style multiline strings
+# Custom Dumper that uses literal block style for multiline strings
+class LiteralDumper(yaml.SafeDumper):
+    """YAML Dumper that uses literal block style (|) for multiline strings."""
+    pass
+
+
 def _literal_str_representer(dumper, data):
     """Represent multiline strings using literal block style (|)."""
     if "\n" in data:
@@ -47,8 +52,7 @@ def _literal_str_representer(dumper, data):
     return dumper.represent_scalar("tag:yaml.org,2002:str", data)
 
 
-# Register the custom representer
-yaml.add_representer(str, _literal_str_representer)
+LiteralDumper.add_representer(str, _literal_str_representer)
 
 
 # LLM instructions that appear in the first YAML document
@@ -287,10 +291,10 @@ def session_to_yaml(session: ReviewSession, diff_context: str = "") -> str:
     # Document 2: Session data
     doc2 = session_to_dict(session)
 
-    # Serialize as multi-document YAML
-    yaml_output = yaml.dump(doc1, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    # Serialize as multi-document YAML with literal block style for multiline strings
+    yaml_output = yaml.dump(doc1, Dumper=LiteralDumper, default_flow_style=False, allow_unicode=True, sort_keys=False)
     yaml_output += "\n---\n"
-    yaml_output += yaml.dump(doc2, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    yaml_output += yaml.dump(doc2, Dumper=LiteralDumper, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
     return yaml_output
 
