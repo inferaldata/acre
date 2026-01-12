@@ -39,20 +39,31 @@ def get_git_user() -> str:
         return "human"
 
 
-# Custom Dumper that uses literal block style for multiline strings
+# Custom string class to force literal block style in YAML
+class LiteralStr(str):
+    """String subclass that forces literal block style (|) in YAML output."""
+    pass
+
+
 class LiteralDumper(yaml.SafeDumper):
-    """YAML Dumper that uses literal block style (|) for multiline strings."""
+    """YAML Dumper that uses literal block style for LiteralStr and multiline strings."""
     pass
 
 
 def _literal_str_representer(dumper, data):
-    """Represent multiline strings using literal block style (|)."""
+    """Always use literal block style for LiteralStr."""
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+
+
+def _str_representer(dumper, data):
+    """Use literal block style for multiline strings."""
     if "\n" in data:
         return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
     return dumper.represent_scalar("tag:yaml.org,2002:str", data)
 
 
-LiteralDumper.add_representer(str, _literal_str_representer)
+LiteralDumper.add_representer(LiteralStr, _literal_str_representer)
+LiteralDumper.add_representer(str, _str_representer)
 
 
 # LLM instructions that appear in the first YAML document
@@ -189,8 +200,8 @@ def session_to_dict(session: ReviewSession) -> dict:
                         "is_deleted_line": c.is_deleted_line,
                         "created_at": c.created_at.isoformat(),
                         "updated_at": c.updated_at.isoformat(),
-                        "context": c.context,
-                        "llm_response": c.llm_response,
+                        "context": LiteralStr(c.context) if c.context else None,
+                        "llm_response": LiteralStr(c.llm_response) if c.llm_response else None,
                         "llm_session_id": c.llm_session_id,
                     }
                     for c in state.comments
@@ -283,9 +294,10 @@ def session_to_yaml(session: ReviewSession, diff_context: str = "") -> str:
         Multi-document YAML string
     """
     # Document 1: Instructions for LLM
+    # Wrap in LiteralStr to force literal block style in YAML
     doc1 = {
-        "instructions": LLM_INSTRUCTIONS,
-        "diff_context": diff_context if diff_context else "# Diff not included. Run 'git diff' to see changes.",
+        "instructions": LiteralStr(LLM_INSTRUCTIONS),
+        "diff_context": LiteralStr(diff_context) if diff_context else "# Diff not included. Run 'git diff' to see changes.",
     }
 
     # Document 2: Session data
