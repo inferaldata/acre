@@ -58,7 +58,8 @@ class AcreApp(App):
                         LineType.CONTEXT: " ",
                         LineType.HEADER: "",
                     }.get(line.line_type, " ")
-                    lines.append(f"{prefix}{line.content}")
+                    # Strip trailing whitespace to ensure YAML uses literal block style
+                    lines.append(f"{prefix}{line.content}".rstrip())
             lines.append("")
         return "\n".join(lines)
 

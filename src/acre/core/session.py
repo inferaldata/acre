@@ -50,20 +50,20 @@ class LiteralDumper(yaml.SafeDumper):
     pass
 
 
-def _literal_str_representer(dumper, data):
-    """Always use literal block style for LiteralStr."""
-    return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
-
-
 def _str_representer(dumper, data):
-    """Use literal block style for multiline strings."""
+    """Use literal block style for LiteralStr and multiline strings."""
+    # Check for LiteralStr first (it's a str subclass)
+    if isinstance(data, LiteralStr):
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+    # Use literal style for any multiline string
     if "\n" in data:
         return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
     return dumper.represent_scalar("tag:yaml.org,2002:str", data)
 
 
-LiteralDumper.add_representer(LiteralStr, _literal_str_representer)
+# Register for both str and LiteralStr to ensure proper dispatch
 LiteralDumper.add_representer(str, _str_representer)
+LiteralDumper.add_representer(LiteralStr, _str_representer)
 
 
 # LLM instructions that appear in the first YAML document
