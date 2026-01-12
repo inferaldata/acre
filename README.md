@@ -1,8 +1,8 @@
 # acre - Agentic Code Review
 
-**Your code review session is a YAML file. Edit it with Claude. Watch acre update live.**
+A terminal code review tool where you and Claude review code together in real time.
 
-acre is a terminal-based code review TUI that treats AI as a first-class collaborator. While you navigate diffs with vim keybindings, Claude can read your comments, respond to questions, and add its own analysis - all through a shared `.acre-review.yaml` file that hot-reloads as you work.
+You navigate diffs with vim keybindings. You add comments. In another terminal, Claude reads your comments and responds. acre hot-reloads and shows Claude's answers inline, right next to your questions.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -23,31 +23,9 @@ acre is a terminal-based code review TUI that treats AI as a first-class collabo
 └──────────┴──────────────────────────────────────────────────────┘
 ```
 
-## Why acre?
+## How It Works
 
-**Traditional code review tools** are designed for humans talking to humans. You write comments, wait for responses, context-switch between browser tabs.
-
-**acre flips this.** Your entire review session lives in a single YAML file:
-
-```yaml
-files:
-  src/api.py:
-    reviewed: true
-    comments:
-      - author: "Jane Developer <jane@example.com>"
-        category: issue
-        content: "Could this cause issues with the downstream aggregator?"
-        line_no: 44
-        context: |
-          @@ -42,6 +42,8 @@
-          -        result = transform(item)
-          +        if item is None:
-          +            continue
-        llm_response: |
-          Good catch! The aggregator expects all items...
-```
-
-Open this file in another terminal with Claude. Ask questions. Get responses. acre hot-reloads and shows Claude's answers inline, right next to your comments.
+Your review session is stored in `.acre-review.yaml` - a file designed for both you and Claude to read and edit. The file contains the diff, your comments, and Claude's responses. When either of you saves changes, acre reloads instantly.
 
 ## Quick Start
 
