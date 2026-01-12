@@ -26,20 +26,55 @@ class DiffSource(ABC):
 
 
 class UncommittedDiffSource(DiffSource):
-    """Diff of uncommitted changes (staged + unstaged)."""
+    """Diff of uncommitted changes (staged + unstaged + untracked)."""
 
     def __init__(self, repo_path: Path):
         self.repo_path = repo_path
 
     def get_diff(self) -> DiffSet:
-        """Get diff of all uncommitted changes vs HEAD."""
+        """Get diff of all uncommitted changes vs HEAD, including untracked files."""
+        # Get diff of tracked files (staged + unstaged)
         result = subprocess.run(
             ["git", "-C", str(self.repo_path), "diff", "HEAD"],
             capture_output=True,
             text=True,
             check=True,
         )
-        return load_diff_from_text(result.stdout, self.get_description())
+        diff_text = result.stdout
+
+        # Get list of untracked files
+        untracked = subprocess.run(
+            ["git", "-C", str(self.repo_path), "ls-files", "--others", "--exclude-standard"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        untracked_files = [f for f in untracked.stdout.strip().split("\n") if f]
+
+        # Generate diff for each untracked file (show as new file)
+        for filepath in untracked_files:
+            full_path = self.repo_path / filepath
+            if full_path.is_file():
+                try:
+                    content = full_path.read_text()
+                    lines = content.split("\n")
+                    # Remove trailing empty line if file ends with newline
+                    if lines and lines[-1] == "":
+                        lines = lines[:-1]
+
+                    # Create unified diff format for new file
+                    diff_text += f"\ndiff --git a/{filepath} b/{filepath}\n"
+                    diff_text += "new file mode 100644\n"
+                    diff_text += "--- /dev/null\n"
+                    diff_text += f"+++ b/{filepath}\n"
+                    diff_text += f"@@ -0,0 +1,{len(lines)} @@\n"
+                    for line in lines:
+                        diff_text += f"+{line}\n"
+                except (UnicodeDecodeError, OSError):
+                    # Skip binary or unreadable files
+                    pass
+
+        return load_diff_from_text(diff_text, self.get_description())
 
     def get_description(self) -> str:
         return "uncommitted changes"
