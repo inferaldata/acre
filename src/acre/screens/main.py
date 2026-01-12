@@ -15,6 +15,7 @@ from acre.widgets.comment_panel import CommentPanel, CommentSelected
 from acre.widgets.diff_view import DiffView
 from acre.widgets.file_list import FileList, FileSelected, FileReviewToggled
 from acre.widgets.llm_sidebar import LLMSidebar
+from acre.widgets.splitter import VerticalSplitter
 from acre.widgets.status_bar import StatusBar
 
 
@@ -65,10 +66,9 @@ class MainScreen(Screen):
     }
 
     #file-panel {
-        width: 30;
+        width: 35;
         min-width: 20;
-        max-width: 50;
-        border-right: solid $primary;
+        max-width: 60;
     }
 
     #diff-panel {
@@ -120,6 +120,7 @@ class MainScreen(Screen):
                 session=self.session,
                 id="file-panel",
             )
+            yield VerticalSplitter(target_id="file-panel", min_size=20, max_size=60)
             yield DiffView(
                 diff_set=self.diff_set,
                 session=self.session,
