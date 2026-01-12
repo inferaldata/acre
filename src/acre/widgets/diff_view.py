@@ -269,7 +269,7 @@ class DiffView(VerticalScroll):
         lines = []
 
         # File header - escape path to prevent markup interpretation
-        status_icon = {"modified": "M", "added": "A", "deleted": "D", "renamed": "R"}[
+        status_icon = {"modified": "M", "added": "A", "deleted": "D", "renamed": "R", "untracked": "?"}[
             file.status
         ]
         escaped_path = rich_escape(file.path)
