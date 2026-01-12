@@ -87,7 +87,7 @@ class DiffFile:
     path: str
     old_path: str | None
     new_path: str | None
-    status: Literal["modified", "added", "deleted", "renamed"]
+    status: Literal["modified", "added", "deleted", "renamed", "untracked"]
     hunks: list[DiffHunk] = field(default_factory=list)
     is_binary: bool = False
 

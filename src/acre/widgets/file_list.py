@@ -135,38 +135,49 @@ class FileList(Tree):
             node = current_node.add_leaf(label, data={"path": file.path})
             self._file_nodes[file.path] = node
 
-    def _format_file_label(self, file: DiffFile, display_name: str | None = None) -> str:
-        """Format the label for a file node.
+    def _format_file_label(self, file: DiffFile, display_name: str | None = None):
+        """Format the label for a file node with colored status.
 
         Args:
             file: The diff file
             display_name: Name to display (defaults to full path)
         """
+        from rich.text import Text
+
         file_state = self.session.files.get(file.path)
         reviewed = file_state.reviewed if file_state else False
         comment_count = file_state.comment_count if file_state else 0
 
-        # Status icon
-        status_icon = {
-            "modified": "M",
-            "added": "A",
-            "deleted": "D",
-            "renamed": "R",
-        }[file.status]
+        # Status icon and color
+        status_config = {
+            "modified": ("M", "yellow"),
+            "added": ("A", "green"),
+            "deleted": ("D", "red"),
+            "renamed": ("R", "blue"),
+            "untracked": ("U", "cyan"),
+        }
+        status_icon, status_color = status_config.get(file.status, ("?", "white"))
 
         # Review status
         review_icon = "\u2713" if reviewed else "\u25cb"
 
         # Build label with display name (filename only in tree view)
         name = display_name if display_name else file.path
-        label = f"{review_icon} {status_icon} {name}"
+
+        # Build Rich Text with colors
+        label = Text()
+        label.append(f"{review_icon} ")
+        label.append(status_icon, style=status_color)
+        label.append(f" {name}")
 
         # Add comment count if any
         if comment_count > 0:
-            label += f" ({comment_count})"
+            label.append(f" ({comment_count})", style="magenta")
 
         # Add diff stats
-        label += f" +{file.added_lines}/-{file.removed_lines}"
+        label.append(f" +{file.added_lines}", style="green")
+        label.append("/")
+        label.append(f"-{file.removed_lines}", style="red")
 
         return label
 

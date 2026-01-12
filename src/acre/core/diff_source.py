@@ -33,6 +33,8 @@ class UncommittedDiffSource(DiffSource):
 
     def get_diff(self) -> DiffSet:
         """Get diff of all uncommitted changes vs HEAD, including untracked files."""
+        from acre.models.diff import DiffFile, DiffHunk, DiffLine, LineType
+
         # Get diff of tracked files (staged + unstaged)
         result = subprocess.run(
             ["git", "-C", str(self.repo_path), "diff", "HEAD"],
@@ -40,7 +42,9 @@ class UncommittedDiffSource(DiffSource):
             text=True,
             check=True,
         )
-        diff_text = result.stdout
+
+        # Parse tracked files diff
+        diff_set = load_diff_from_text(result.stdout, self.get_description())
 
         # Get list of untracked files
         untracked = subprocess.run(
@@ -51,30 +55,53 @@ class UncommittedDiffSource(DiffSource):
         )
         untracked_files = [f for f in untracked.stdout.strip().split("\n") if f]
 
-        # Generate diff for each untracked file (show as new file)
+        # Create DiffFile objects for untracked files with status="untracked"
         for filepath in untracked_files:
             full_path = self.repo_path / filepath
             if full_path.is_file():
                 try:
                     content = full_path.read_text()
-                    lines = content.split("\n")
+                    file_lines = content.split("\n")
                     # Remove trailing empty line if file ends with newline
-                    if lines and lines[-1] == "":
-                        lines = lines[:-1]
+                    if file_lines and file_lines[-1] == "":
+                        file_lines = file_lines[:-1]
 
-                    # Create unified diff format for new file
-                    diff_text += f"\ndiff --git a/{filepath} b/{filepath}\n"
-                    diff_text += "new file mode 100644\n"
-                    diff_text += "--- /dev/null\n"
-                    diff_text += f"+++ b/{filepath}\n"
-                    diff_text += f"@@ -0,0 +1,{len(lines)} @@\n"
-                    for line in lines:
-                        diff_text += f"+{line}\n"
+                    # Create diff lines (all additions)
+                    diff_lines = [
+                        DiffLine(
+                            line_type=LineType.ADDITION,
+                            content=line,
+                            old_line_no=None,
+                            new_line_no=i + 1,
+                        )
+                        for i, line in enumerate(file_lines)
+                    ]
+
+                    # Create hunk
+                    hunk = DiffHunk(
+                        old_start=0,
+                        old_count=0,
+                        new_start=1,
+                        new_count=len(file_lines),
+                        header="",
+                        lines=diff_lines,
+                    )
+
+                    # Create DiffFile with untracked status
+                    diff_file = DiffFile(
+                        path=filepath,
+                        old_path=None,
+                        new_path=filepath,
+                        status="untracked",
+                        hunks=[hunk],
+                    )
+                    diff_set.files.append(diff_file)
+
                 except (UnicodeDecodeError, OSError):
                     # Skip binary or unreadable files
                     pass
 
-        return load_diff_from_text(diff_text, self.get_description())
+        return diff_set
 
     def get_description(self) -> str:
         return "uncommitted changes"
