@@ -6,7 +6,7 @@ import click
 
 from acre.app import AcreApp
 from acre.core.diff_source import get_diff_source
-from acre.core.session import load_session
+from acre.core.session import load_session, save_session
 from acre.models.review import ReviewSession
 
 
@@ -116,6 +116,9 @@ def cli(
     # Run app (auto-saves to .acre-review.yaml on changes)
     app = AcreApp(diff_set=diff_set, session=session, semantic_mode=semantic)
     app.run()
+
+    # Always save on exit to ensure correct format
+    app.save_session_with_context()
 
 
 if __name__ == "__main__":
