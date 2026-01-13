@@ -6,25 +6,6 @@ You navigate diffs with vim keybindings. You add comments. In another terminal, 
 
 ![acre demo](demos/acre-demo-fast.gif)
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ acre                                          Files: 3/7 [████░]│
-├──────────┬──────────────────────────────────────────────────────┤
-│ Files    │ @@ -42,6 +42,8 @@ def process_data(items):          │
-│          │      for item in items:                              │
-│ ✓ api.py │ -        result = transform(item)                    │
-│   auth.py│ +        if item is None:                            │
-│   utils  │ +            continue                                │
-│          │ +        result = transform(item)                    │
-│          │                                                      │
-│          │  ┃ [ISSUE] L44 (You): Could this cause issues with   │
-│          │  ┃ the downstream aggregator?                        │
-│          │  ┃   └─ Claude: Good catch! The aggregator expects   │
-│          │  ┃      all items to be processed. Consider logging  │
-│          │  ┃      skipped items instead of silently dropping.  │
-└──────────┴──────────────────────────────────────────────────────┘
-```
-
 ## How It Works
 
 Your review session is stored in `.opencodereview.xml` using the [OpenCodeReview](https://github.com/opencodereview-org/opencodereview) specification - a portable format designed for both humans and AI to read and edit. The file contains the diff, your comments, and Claude's responses. When either of you saves changes, acre reloads instantly.
