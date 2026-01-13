@@ -91,40 +91,43 @@ The `.opencodereview.xml` file is designed to be read and written by LLMs. It in
 
 1. Run `acre` and add some comments
 2. In another terminal: `cat .opencodereview.xml | claude "Review this and respond to my comments"`
-3. Claude edits the file, adding `llm_response` to your comments
+3. Claude edits the file, adding replies to your comments
 4. acre hot-reloads - Claude's responses appear inline!
 
 Or just open the file in Claude Code and have a conversation about the code.
 
 ### What Claude Sees
 
-```yaml
-instructions: |
-  This is an acre code review session.
+The `.opencodereview.xml` file uses the [OpenCodeReview](https://github.com/opencodereview-org/opencodereview) specification. Comments are stored as activities:
 
-  FIND comments that need a response (llm_response is null)
-  RESPOND by adding llm_response field
-  Only ADD new comments if explicitly requested
-
-diff_context: |
-  # src/api.py (modified)
-  @@ -42,6 +42,8 @@
-  -        result = transform(item)
-  +        if item is None:
-  +            continue
-  +        result = transform(item)
----
-files:
-  src/api.py:
-    comments:
-      - author: "Jane Developer <jane@example.com>"
-        content: "Could this silently drop data?"
-        line_no: 44
-        context: "@@ -42,6 +42,8 @@ ..."
-        llm_response: null  # <-- Claude fills this in
+```xml
+<activity>
+  <category>issue</category>
+  <content>Could this silently drop data?</content>
+  <author><name>Jane Developer</name><email>jane@example.com</email></author>
+  <location>
+    <file>src/api.py</file>
+    <lines><range><start>44</start><end>44</end></range></lines>
+  </location>
+  <replies>
+    <!-- Claude adds replies here -->
+  </replies>
+</activity>
 ```
 
-Each comment includes the `context` field with the relevant hunk, so Claude has full visibility into what you're commenting on.
+Claude responds by adding a reply inside `<replies>`:
+
+```xml
+<replies>
+  <activity>
+    <category>note</category>
+    <content>Good catch. If item is None, transform() would fail...</content>
+    <author><type>agent</type><name>Claude</name><model>opus</model></author>
+  </activity>
+</replies>
+```
+
+The file also contains embedded instructions and the diff context, so Claude has everything needed to understand and respond to your comments.
 
 ## Tips
 
