@@ -4,6 +4,8 @@ A terminal code review tool where you and Claude review code together in real ti
 
 You navigate diffs with vim keybindings. You add comments. In another terminal, Claude reads your comments and responds. acre hot-reloads and shows Claude's answers inline, right next to your questions.
 
+![acre demo](demos/acre-demo-fast.gif)
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │ acre                                          Files: 3/7 [████░]│
