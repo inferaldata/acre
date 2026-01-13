@@ -534,6 +534,8 @@ class MainScreen(Screen):
             self.diff_view.clear_selection()
             self.diff_view._build_line_index()  # Rebuild to exclude resolved
             self.diff_view.refresh_current_file()
+            if self._show_resolved_panel:
+                self.resolved_panel.refresh_resolved()
             self._auto_save()
 
             plural = "s" if resolved_count > 1 else ""
