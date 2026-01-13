@@ -5,12 +5,9 @@ from textual.binding import Binding
 from textual.widgets import Footer, Header
 
 from acre.core.diff_source import get_diff_source
-from acre.core.session import get_session_file_path, load_session, save_session
 from acre.core.watcher import DiffWatcher, SessionWatcher
 from acre.models.diff import DiffSet
-from acre.models.review import ReviewSession
-from acre.screens.help import HelpScreen
-from acre.screens.main import MainScreen
+from acre.models.ocr_adapter import AcreSession, get_session_path
 
 
 class AcreApp(App):
@@ -33,7 +30,7 @@ class AcreApp(App):
     def __init__(
         self,
         diff_set: DiffSet,
-        session: ReviewSession,
+        session: AcreSession,
         semantic_mode: bool = False,
     ):
         super().__init__()
@@ -42,33 +39,20 @@ class AcreApp(App):
         self.semantic_mode = semantic_mode
         self._watcher: SessionWatcher | None = None
         self._diff_watcher: DiffWatcher | None = None
-        self._diff_context = self._generate_diff_context()
 
-    def _generate_diff_context(self) -> str:
-        """Generate the diff context for the YAML file."""
-        from acre.models.diff import LineType
-
-        lines = []
-        for file in self.diff_set.files:
-            lines.append(f"# {file.path} ({file.status})")
-            for hunk in file.hunks:
-                lines.append(f"@@ {hunk.header} @@")
-                for line in hunk.lines:
-                    prefix = {
-                        LineType.ADDITION: "+",
-                        LineType.DELETION: "-",
-                        LineType.CONTEXT: " ",
-                        LineType.HEADER: "",
-                    }.get(line.line_type, " ")
-                    # Strip trailing whitespace to ensure YAML uses literal block style
-                    lines.append(f"{prefix}{line.content}".rstrip())
-            lines.append("")
-        return "\n".join(lines)
+    def _get_session_path(self):
+        """Get the session file path."""
+        return get_session_path(
+            self.session.repo_path,
+            self.session.diff_source_type,
+            self.session.diff_source_ref,
+            self.session.format,
+        )
 
     def on_mount(self) -> None:
         """Called when app is mounted."""
         # Start session file watcher
-        session_path = get_session_file_path(self.session)
+        session_path = self._get_session_path()
         self._watcher = SessionWatcher(
             session_path=session_path,
             on_change=self._on_session_file_changed,
@@ -85,6 +69,7 @@ class AcreApp(App):
             self._diff_watcher.start()
 
         # Push main screen
+        from acre.screens.main import MainScreen
         self.push_screen(
             MainScreen(
                 diff_set=self.diff_set,
@@ -103,46 +88,27 @@ class AcreApp(App):
         self.call_later(self._reload_diff_and_refresh)
 
     def _reload_session(self) -> None:
-        """Reload the session from disk and refresh the UI."""
-        session_path = get_session_file_path(self.session)
+        """Reload the session from disk and refresh the UI.
+
+        With OCR's append-only model, we simply reload the entire review
+        since get_visible_activities() handles superseded/retracted items.
+        """
+        session_path = self._get_session_path()
         if not session_path.exists():
             return
 
         try:
-            new_session = load_session(session_path)
+            # Load the new session state
+            new_session = AcreSession.load(session_path, format=self.session.format)
 
-            # Merge changes: take new comments and review states from disk
-            # but keep the session ID and other metadata
-            for file_path, new_state in new_session.files.items():
-                if file_path in self.session.files:
-                    old_state = self.session.files[file_path]
-                    # Update reviewed status if changed
-                    old_state.reviewed = new_state.reviewed
-
-                    # Merge comments: keep existing, add new ones
-                    existing_ids = {c.id for c in old_state.comments}
-                    for comment in new_state.comments:
-                        if comment.id not in existing_ids:
-                            old_state.comments.append(comment)
-                        else:
-                            # Update existing comment if it was modified
-                            for i, existing in enumerate(old_state.comments):
-                                if existing.id == comment.id:
-                                    # Check if modified externally (e.g., llm_response added)
-                                    if (
-                                        comment.llm_response != existing.llm_response
-                                        or comment.content != existing.content
-                                    ):
-                                        old_state.comments[i] = comment
-                                    break
-                else:
-                    # New file state
-                    self.session.files[file_path] = new_state
+            # Replace the review with the newly loaded one
+            self.session.review = new_session.review
 
             # Reload the diff to pick up any new changes
             self._reload_diff()
 
             # Refresh the main screen
+            from acre.screens.main import MainScreen
             main_screen = self.screen
             if isinstance(main_screen, MainScreen):
                 main_screen.diff_view.diff_set = self.diff_set
@@ -169,7 +135,6 @@ class AcreApp(App):
                 pr=(int(self.session.diff_source_ref) if self.session.diff_source_type == "pr" else None),
             )
             self.diff_set = source.get_diff()
-            self._diff_context = self._generate_diff_context()
         except Exception as e:
             self.notify(f"Failed to reload diff: {e}", severity="warning")
 
@@ -178,6 +143,7 @@ class AcreApp(App):
         self._reload_diff()
 
         # Refresh the main screen with new diff
+        from acre.screens.main import MainScreen
         main_screen = self.screen
         if isinstance(main_screen, MainScreen):
             main_screen.diff_view.diff_set = self.diff_set
@@ -188,15 +154,17 @@ class AcreApp(App):
 
         self.notify("Diff reloaded")
 
-    def save_session_with_context(self) -> None:
-        """Save the session with diff context for LLM."""
-        save_session(self.session, diff_context=self._diff_context)
+    def save_session(self) -> None:
+        """Save the session to disk."""
+        session_path = self._get_session_path()
+        self.session.save(session_path)
         # Mark our save AFTER writing so mtime comparison works
         if self._watcher:
             self._watcher.mark_our_save()
 
     def action_help(self) -> None:
         """Show help screen."""
+        from acre.screens.help import HelpScreen
         self.push_screen(HelpScreen())
 
     def on_unmount(self) -> None:

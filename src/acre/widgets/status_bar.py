@@ -2,7 +2,7 @@
 
 from textual.widgets import Static
 
-from acre.models.review import ReviewSession
+from acre.models.ocr_adapter import AcreSession
 
 
 class StatusBar(Static):
@@ -16,7 +16,7 @@ class StatusBar(Static):
     }
     """
 
-    def __init__(self, session: ReviewSession, **kwargs):
+    def __init__(self, session: AcreSession, **kwargs):
         super().__init__(**kwargs)
         self.session = session
 

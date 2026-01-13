@@ -1,6 +1,6 @@
 """Comment input widget for adding and editing review comments."""
 
-from datetime import datetime
+from enum import Enum
 
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -9,17 +9,44 @@ from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Button, Label, Select, Static, TextArea
 
-from acre.core.session import get_git_user
-from acre.models.comment import Comment, CommentCategory
+from acre.models.ocr_adapter import CommentView
+
+
+class CommentCategory(Enum):
+    """Category of a review comment for UI display."""
+
+    NOTE = "note"
+    SUGGESTION = "suggestion"
+    ISSUE = "issue"
+    PRAISE = "praise"
+
+    @property
+    def label(self) -> str:
+        """Get display label for the category."""
+        return self.value.upper()
 
 
 class CommentSubmitted(Message):
     """Message sent when a comment is submitted."""
 
-    def __init__(self, comment: Comment, is_edit: bool = False):
+    def __init__(
+        self,
+        content: str,
+        file_path: str,
+        category: str,
+        line_no: int | None = None,
+        line_no_end: int | None = None,
+        is_edit: bool = False,
+        edit_comment_id: str | None = None,
+    ):
         super().__init__()
-        self.comment = comment
+        self.content = content
+        self.file_path = file_path
+        self.category = category
+        self.line_no = line_no
+        self.line_no_end = line_no_end
         self.is_edit = is_edit
+        self.edit_comment_id = edit_comment_id
 
 
 class CommentCancelled(Message):
@@ -29,11 +56,12 @@ class CommentCancelled(Message):
 
 
 class CommentDeleted(Message):
-    """Message sent when a comment is deleted."""
+    """Message sent when a comment is deleted (actually resolves it)."""
 
-    def __init__(self, comment: Comment):
+    def __init__(self, comment_id: str, file_path: str):
         super().__init__()
-        self.comment = comment
+        self.comment_id = comment_id
+        self.file_path = file_path
 
 
 class CommentInput(Widget):
@@ -109,7 +137,7 @@ class CommentInput(Widget):
         line_no: int | None = None,
         line_no_end: int | None = None,
         is_deleted_line: bool = False,
-        edit_comment: Comment | None = None,
+        edit_comment: CommentView | None = None,
         context: str | None = None,
         **kwargs,
     ):
@@ -144,7 +172,8 @@ class CommentInput(Widget):
 
         # Category selector row
         with Horizontal(id="controls-row"):
-            initial_category = self.edit_comment.category.value if self.edit_comment else CommentCategory.NOTE.value
+            # CommentView.category returns a string, not enum
+            initial_category = self.edit_comment.category if self.edit_comment else CommentCategory.NOTE.value
             yield Select(
                 [
                     (cat.label, cat.value)
@@ -209,15 +238,19 @@ class CommentInput(Widget):
             self.notify("Comment cannot be empty", severity="warning")
             return
 
-        category = CommentCategory(category_select.value)
+        category = category_select.value
 
         if self.edit_comment:
-            # Update existing comment
-            comment = self.edit_comment
-            comment.category = category
-            comment.content = content
-            comment.updated_at = datetime.now()
-            self.post_message(CommentSubmitted(comment, is_edit=True))
+            # Edit creates a superseding comment via OCR
+            self.post_message(CommentSubmitted(
+                content=content,
+                file_path=self.edit_comment.file_path,
+                category=category,
+                line_no=self.edit_comment.line_no,
+                line_no_end=self.edit_comment.line_no_end,
+                is_edit=True,
+                edit_comment_id=self.edit_comment.id,
+            ))
         else:
             # Create new comment
             # Normalize line range
@@ -228,19 +261,19 @@ class CommentInput(Widget):
                 if line_no == line_no_end:
                     line_no_end = None  # Single line, no range
 
-            comment = Comment(
+            self.post_message(CommentSubmitted(
                 content=content,
                 file_path=self.file_path,
                 category=category,
-                author=get_git_user(),
                 line_no=line_no,
                 line_no_end=line_no_end,
-                is_deleted_line=self.is_deleted_line,
-                context=self.context,
-            )
-            self.post_message(CommentSubmitted(comment, is_edit=False))
+                is_edit=False,
+            ))
 
     def _delete_comment(self) -> None:
-        """Delete the comment being edited."""
+        """Delete the comment being edited (actually resolves it via OCR)."""
         if self.edit_comment:
-            self.post_message(CommentDeleted(self.edit_comment))
+            self.post_message(CommentDeleted(
+                comment_id=self.edit_comment.id,
+                file_path=self.edit_comment.file_path,
+            ))

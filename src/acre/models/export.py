@@ -3,8 +3,16 @@
 from dataclasses import dataclass
 from enum import Enum
 
-from acre.models.comment import CommentCategory
-from acre.models.review import ReviewSession
+from acre.models.ocr_adapter import AcreSession, CommentView
+
+
+# Category info for export (since we no longer have CommentCategory enum with descriptions)
+CATEGORY_INFO = {
+    "note": ("NOTE", "observations"),
+    "suggestion": ("SUGGESTION", "improvements"),
+    "issue": ("ISSUE", "problems to fix"),
+    "praise": ("PRAISE", "positive feedback"),
+}
 
 
 class ExportFormat(Enum):
@@ -14,11 +22,20 @@ class ExportFormat(Enum):
     JSON = "json"
 
 
+def _format_comment_line(comment: CommentView, number: int) -> str:
+    """Format a comment for export.
+
+    Format: N. **[TYPE]** `location` - content
+    """
+    category_label = comment.category.upper()
+    return f"{number}. **[{category_label}]** {comment.location} - {comment.content}"
+
+
 @dataclass
 class ReviewExport:
     """Handles exporting review session to various formats."""
 
-    session: ReviewSession
+    session: AcreSession
 
     def to_markdown(self) -> str:
         """Export to Markdown format optimized for LLM consumption.
@@ -54,7 +71,7 @@ class ReviewExport:
 
         # Comment type legend
         legend_parts = [
-            f"{cat.label} ({cat.description})" for cat in CommentCategory
+            f"{label} ({desc})" for label, desc in CATEGORY_INFO.values()
         ]
         lines.append(f"Comment types: {', '.join(legend_parts)}")
         lines.append("")
@@ -70,7 +87,7 @@ class ReviewExport:
             lines.append("No comments.")
         else:
             for i, comment in enumerate(comments, 1):
-                lines.append(comment.to_export_line(i))
+                lines.append(_format_comment_line(comment, i))
 
         return "\n".join(lines)
 
@@ -89,7 +106,7 @@ class ReviewExport:
             "comments": [
                 {
                     "id": c.id,
-                    "category": c.category.value,
+                    "category": c.category,  # Already a string in CommentView
                     "file_path": c.file_path,
                     "line_no": c.line_no,
                     "is_deleted_line": c.is_deleted_line,

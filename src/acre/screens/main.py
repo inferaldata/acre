@@ -6,11 +6,8 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Static
 
-from acre.core.session import save_session
-from acre.models.comment import Comment
 from acre.models.diff import DiffSet
-from acre.models.review import ReviewSession
-from acre.core.session import get_git_user
+from acre.models.ocr_adapter import AcreSession, CommentView
 from acre.widgets.comment_input import CommentCancelled, CommentDeleted, CommentInput, CommentSubmitted
 from acre.widgets.comment_panel import CommentPanel, CommentSelected
 from acre.widgets.diff_view import DiffView
@@ -50,18 +47,17 @@ class MainScreen(Screen):
         Binding("c", "add_comment", "Comment", show=True),
         Binding("C", "add_file_comment", "File Comment", show=False),
         Binding("e", "edit_comment", "Edit", show=True),
-        Binding("x", "delete_comment", "Delete", show=True),
+        Binding("x", "resolve_comment", "Resolve", show=True),
         # Panel control
         Binding("tab", "toggle_panel", "Toggle Panel", show=False),
         Binding("p", "toggle_comments", "Comments", show=True),
         Binding("`", "toggle_llm", "LLM", key_display="`", show=False),
         # Hunk resolution
-        Binding("-", "resolve_or_toggle", "Resolve", key_display="-", show=True),
+        Binding("-", "resolve_or_toggle", "Mark Reviewed", key_display="-", show=True),
         # LLM actions
         Binding("a", "analyze", "Analyze", show=False),
         # Semantic mode
         Binding("s", "toggle_semantic", "Semantic", show=False),
-        # Export (removed colon command for now - not supported in Textual this way)
     ]
 
     CSS = """
@@ -113,7 +109,7 @@ class MainScreen(Screen):
     def __init__(
         self,
         diff_set: DiffSet,
-        session: ReviewSession,
+        session: AcreSession,
         semantic_mode: bool = False,
     ):
         super().__init__()
@@ -232,14 +228,14 @@ class MainScreen(Screen):
         """Toggle reviewed status for current file."""
         current_file = self.diff_view.current_file
         if current_file:
-            self.session.toggle_reviewed(current_file.path)
+            is_reviewed = self.session.toggle_reviewed(current_file.path)
             self.diff_view.refresh_current_file()
             self.file_list.refresh_file(current_file.path)
             self._update_status()
             self._auto_save()
             self.notify(
                 f"Marked {current_file.path} as "
-                f"{'reviewed' if self.session.files[current_file.path].reviewed else 'not reviewed'}"
+                f"{'reviewed' if is_reviewed else 'not reviewed'}"
             )
 
     def action_add_comment(self) -> None:
@@ -282,7 +278,7 @@ class MainScreen(Screen):
         self._open_comment_input(current_file.path, line_no=None)
 
     def action_edit_comment(self) -> None:
-        """Edit the comment at cursor position."""
+        """Edit the comment at cursor position (creates superseding comment)."""
         comment = self.diff_view.get_comment_at_cursor()
         if not comment:
             self.notify("No comment at cursor", severity="warning")
@@ -295,14 +291,15 @@ class MainScreen(Screen):
             edit_comment=comment,
         )
 
-    def action_delete_comment(self) -> None:
-        """Delete the comment at cursor position."""
+    def action_resolve_comment(self) -> None:
+        """Resolve the comment at cursor position."""
         comment = self.diff_view.get_comment_at_cursor()
         if not comment:
             self.notify("No comment at cursor", severity="warning")
             return
 
-        self.session.remove_comment(comment)
+        # Use OCR's Resolution activity instead of deleting
+        self.session.resolve_comment(comment.id)
         self.diff_view.refresh_current_file()
         self.file_list.refresh_file(comment.file_path)
         self._update_status()
@@ -311,14 +308,10 @@ class MainScreen(Screen):
         if self._show_comment_panel:
             self.comment_panel.refresh_comments()
 
-        self.notify(f"Deleted {comment.category.label} comment")
+        self.notify(f"Resolved {comment.category.upper()} comment")
 
     def _get_hunk_context(self, line_no: int | None = None) -> str | None:
-        """Get the hunk content for context when commenting.
-
-        Returns the content of the hunk containing the given line,
-        or the current hunk if no line specified.
-        """
+        """Get the hunk content for context when commenting."""
         current_file = self.diff_view.current_file
         if not current_file:
             return None
@@ -350,7 +343,6 @@ class MainScreen(Screen):
                 LineType.DELETION: "-",
                 LineType.CONTEXT: " ",
             }.get(line.line_type, " ")
-            # Strip trailing whitespace to ensure YAML uses literal block style
             lines.append(f"{prefix}{line.content}".rstrip())
         return "\n".join(lines)
 
@@ -360,7 +352,7 @@ class MainScreen(Screen):
         line_no: int | None = None,
         line_no_end: int | None = None,
         is_deleted_line: bool = False,
-        edit_comment: Comment | None = None,
+        edit_comment: CommentView | None = None,
     ) -> None:
         """Open the inline comment input panel."""
         # Remove any existing comment input
@@ -386,18 +378,26 @@ class MainScreen(Screen):
 
     def on_comment_submitted(self, event: CommentSubmitted) -> None:
         """Handle comment submission from inline input."""
-        comment = event.comment
-
-        if event.is_edit:
-            # Comment was already updated in place, just refresh views
+        if event.is_edit and event.edit_comment_id:
+            # Edit creates a superseding comment
+            self.session.edit_comment(
+                comment_id=event.edit_comment_id,
+                new_content=event.content,
+            )
             action = "Updated"
         else:
-            # New comment - add to session
-            self.session.add_comment(comment)
+            # New comment
+            self.session.add_comment(
+                content=event.content,
+                file_path=event.file_path,
+                category=event.category,
+                line_no=event.line_no,
+                line_no_end=event.line_no_end,
+            )
             action = "Added"
 
         self.diff_view.refresh_current_file()
-        self.file_list.refresh_file(comment.file_path)
+        self.file_list.refresh_file(event.file_path)
         self._update_status()
         self._auto_save()
 
@@ -409,9 +409,8 @@ class MainScreen(Screen):
         for widget in self.query("CommentInput"):
             widget.remove()
 
-        cat_label = comment.category.label
-        location = comment.location_short
-        self.notify(f"{action} {cat_label} comment at {location}")
+        location = f"L{event.line_no}" if event.line_no else "file"
+        self.notify(f"{action} {event.category.upper()} comment at {location}")
 
     def on_comment_cancelled(self, event: CommentCancelled) -> None:
         """Handle comment cancellation."""
@@ -419,11 +418,10 @@ class MainScreen(Screen):
             widget.remove()
 
     def on_comment_deleted(self, event: CommentDeleted) -> None:
-        """Handle comment deletion from input panel."""
-        comment = event.comment
-        self.session.remove_comment(comment)
+        """Handle comment deletion from input panel (resolves it)."""
+        self.session.resolve_comment(event.comment_id)
         self.diff_view.refresh_current_file()
-        self.file_list.refresh_file(comment.file_path)
+        self.file_list.refresh_file(event.file_path)
         self._update_status()
         self._auto_save()
 
@@ -434,7 +432,7 @@ class MainScreen(Screen):
         for widget in self.query("CommentInput"):
             widget.remove()
 
-        self.notify(f"Deleted {comment.category.label} comment")
+        self.notify(f"Resolved comment")
 
     def on_file_selected(self, event: FileSelected) -> None:
         """Handle file selection from file list."""
@@ -443,15 +441,14 @@ class MainScreen(Screen):
     def on_file_review_toggled(self, event: FileReviewToggled) -> None:
         """Handle file review toggle from file list."""
         file_path = event.file_path
-        self.session.toggle_reviewed(file_path)
+        is_reviewed = self.session.toggle_reviewed(file_path)
         self.file_list.refresh_file(file_path)
         # Also refresh diff view if it's showing this file
         if self.diff_view.current_file and self.diff_view.current_file.path == file_path:
             self.diff_view.refresh_current_file()
         self._update_status()
         self._auto_save()
-        reviewed = self.session.files[file_path].reviewed if file_path in self.session.files else False
-        self.notify(f"Marked {file_path} as {'reviewed' if reviewed else 'not reviewed'}")
+        self.notify(f"Marked {file_path} as {'reviewed' if is_reviewed else 'not reviewed'}")
 
     def action_toggle_panel(self) -> None:
         """Toggle file panel visibility."""
@@ -492,9 +489,7 @@ class MainScreen(Screen):
             self.resolved_panel.focus()
 
     def _resolve_selected_hunks(self) -> None:
-        """Mark selected hunks as resolved."""
-        from acre.models.review import ResolvedHunk
-
+        """Mark selected hunks as reviewed."""
         current_file = self.diff_view.current_file
         if not current_file:
             return
@@ -504,11 +499,11 @@ class MainScreen(Screen):
             self.notify("No hunks in selection", severity="warning")
             return
 
-        file_state = self.session.get_file_state(current_file.path)
         resolved_count = 0
 
         for hunk_idx, hunk in selected_hunks:
             hunk_id = hunk.get_id(current_file.path)
+            file_state = self.session.get_file_state(current_file.path)
             if not file_state.is_hunk_resolved(hunk_id):
                 # Create preview from first 3 lines
                 preview_lines = []
@@ -516,18 +511,17 @@ class MainScreen(Screen):
                     prefix = "+" if line.line_type.value == "addition" else "-" if line.line_type.value == "deletion" else " "
                     preview_lines.append(f"{prefix}{line.content}")
 
-                resolved = ResolvedHunk(
-                    hunk_id=hunk_id,
+                # Use OCR adapter to mark hunk as reviewed
+                self.session.resolve_hunk(
                     file_path=current_file.path,
+                    hunk_id=hunk_id,
                     old_start=hunk.old_start,
                     old_count=hunk.old_count,
                     new_start=hunk.new_start,
                     new_count=hunk.new_count,
                     header=hunk.header,
                     lines_preview="\n".join(preview_lines),
-                    resolved_by=get_git_user(),
                 )
-                file_state.resolve_hunk(resolved)
                 resolved_count += 1
 
         if resolved_count > 0:
@@ -539,18 +533,17 @@ class MainScreen(Screen):
             self._auto_save()
 
             plural = "s" if resolved_count > 1 else ""
-            self.notify(f"Resolved {resolved_count} hunk{plural}")
+            self.notify(f"Marked {resolved_count} hunk{plural} as reviewed")
 
     def on_hunk_resurrected(self, event: HunkResurrected) -> None:
         """Handle hunk resurrection from resolved panel."""
-        file_state = self.session.files.get(event.file_path)
-        if file_state and file_state.unresolve_hunk(event.hunk_id):
+        if self.session.unresolve_hunk(event.file_path, event.hunk_id):
             # Rebuild diff view to show resurrected hunk
             self.diff_view._build_line_index()
             self.diff_view.refresh_current_file()
             self.resolved_panel.refresh_resolved()
             self._auto_save()
-            self.notify("Hunk resurrected")
+            self.notify("Hunk unmarked as reviewed")
 
     def action_analyze(self) -> None:
         """Analyze current file with Claude."""
@@ -608,12 +601,9 @@ class MainScreen(Screen):
     def _auto_save(self) -> None:
         """Auto-save the session."""
         try:
-            # Use app's method to include diff context and mark our save
             from acre.app import AcreApp
             if isinstance(self.app, AcreApp):
-                self.app.save_session_with_context()
-            else:
-                save_session(self.session)
+                self.app.save_session()
         except Exception as e:
             self.notify(f"Auto-save failed: {e}", severity="warning")
 

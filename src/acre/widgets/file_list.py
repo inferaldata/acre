@@ -6,7 +6,7 @@ from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
 
 from acre.models.diff import DiffSet, DiffFile
-from acre.models.review import ReviewSession
+from acre.models.ocr_adapter import AcreSession
 
 
 class FileReviewToggled(Message):
@@ -42,7 +42,7 @@ class FileList(Tree):
     def __init__(
         self,
         diff_set: DiffSet,
-        session: ReviewSession,
+        session: AcreSession,
         **kwargs,
     ):
         super().__init__(diff_set.source_description, **kwargs)

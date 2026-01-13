@@ -7,7 +7,7 @@ from textual.containers import VerticalScroll
 from textual.message import Message
 from textual.widgets import Static
 
-from acre.models.review import ResolvedHunk, ReviewSession
+from acre.models.ocr_adapter import AcreSession
 
 
 class HunkResurrected(Message):
@@ -64,10 +64,11 @@ class ResolvedPanel(VerticalScroll):
     }
     """
 
-    def __init__(self, session: ReviewSession, **kwargs):
+    def __init__(self, session: AcreSession, **kwargs):
         super().__init__(**kwargs)
         self.session = session
-        self._resolved_by_id: dict[str, ResolvedHunk] = {}
+        # Resolved hunks are now dicts from the adapter
+        self._resolved_by_id: dict[str, dict] = {}
         self._selected_hunk_id: str | None = None
         self._widget_counter = 0
 
@@ -76,12 +77,12 @@ class ResolvedPanel(VerticalScroll):
         yield Static("Resolved Hunks", classes="resolved-header")
         yield from self._render_resolved()
 
-    def _get_all_resolved(self) -> list[ResolvedHunk]:
+    def _get_all_resolved(self) -> list[dict]:
         """Get all resolved hunks across all files."""
         resolved = []
         for file_state in self.session.files.values():
             resolved.extend(file_state.resolved_hunks)
-        return sorted(resolved, key=lambda r: (r.file_path, r.old_start))
+        return sorted(resolved, key=lambda r: (r["file_path"], r["old_start"]))
 
     def _render_resolved(self):
         """Render all resolved hunks."""
@@ -96,12 +97,15 @@ class ResolvedPanel(VerticalScroll):
             return
 
         for i, rh in enumerate(resolved, 1):
-            self._resolved_by_id[rh.hunk_id] = rh
+            hunk_id = rh["hunk_id"]
+            self._resolved_by_id[hunk_id] = rh
 
             # Format: file:lines (header preview)
-            location = f"{rh.file_path}:{rh.old_start}"
-            header_preview = rh.header[:30] + "..." if len(rh.header) > 30 else rh.header
-            lines_preview = rh.lines_preview[:40] + "..." if len(rh.lines_preview) > 40 else rh.lines_preview
+            location = f"{rh['file_path']}:{rh['old_start']}"
+            header = rh.get("header", "")
+            lines_preview_text = rh.get("lines_preview", "")
+            header_preview = header[:30] + "..." if len(header) > 30 else header
+            lines_preview = lines_preview_text[:40] + "..." if len(lines_preview_text) > 40 else lines_preview_text
 
             markup = (
                 f"[green]{i}.[/green] [dim]{rich_escape(location)}[/dim]\n"
@@ -114,7 +118,7 @@ class ResolvedPanel(VerticalScroll):
                 markup += f"  {rich_escape(first_line)}"
 
             classes = "resolved-item"
-            if self._selected_hunk_id == rh.hunk_id:
+            if self._selected_hunk_id == hunk_id:
                 classes += " resolved-selected"
 
             self._widget_counter += 1
@@ -123,14 +127,14 @@ class ResolvedPanel(VerticalScroll):
                 classes=classes,
                 id=f"resolved-widget-{self._widget_counter}",
             )
-            widget._hunk_id = rh.hunk_id
+            widget._hunk_id = hunk_id
             yield widget
 
     def action_resurrect(self) -> None:
         """Resurrect the selected hunk."""
         if self._selected_hunk_id and self._selected_hunk_id in self._resolved_by_id:
             rh = self._resolved_by_id[self._selected_hunk_id]
-            self.post_message(HunkResurrected(rh.hunk_id, rh.file_path))
+            self.post_message(HunkResurrected(rh["hunk_id"], rh["file_path"]))
 
     def action_cursor_down(self) -> None:
         """Move cursor down."""
@@ -139,12 +143,12 @@ class ResolvedPanel(VerticalScroll):
             return
 
         if self._selected_hunk_id is None:
-            self._selected_hunk_id = resolved[0].hunk_id
+            self._selected_hunk_id = resolved[0]["hunk_id"]
         else:
             for i, rh in enumerate(resolved):
-                if rh.hunk_id == self._selected_hunk_id:
+                if rh["hunk_id"] == self._selected_hunk_id:
                     if i < len(resolved) - 1:
-                        self._selected_hunk_id = resolved[i + 1].hunk_id
+                        self._selected_hunk_id = resolved[i + 1]["hunk_id"]
                     break
         self.refresh_resolved()
 
@@ -155,12 +159,12 @@ class ResolvedPanel(VerticalScroll):
             return
 
         if self._selected_hunk_id is None:
-            self._selected_hunk_id = resolved[-1].hunk_id
+            self._selected_hunk_id = resolved[-1]["hunk_id"]
         else:
             for i, rh in enumerate(resolved):
-                if rh.hunk_id == self._selected_hunk_id:
+                if rh["hunk_id"] == self._selected_hunk_id:
                     if i > 0:
-                        self._selected_hunk_id = resolved[i - 1].hunk_id
+                        self._selected_hunk_id = resolved[i - 1]["hunk_id"]
                     break
         self.refresh_resolved()
 

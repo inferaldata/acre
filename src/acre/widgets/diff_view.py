@@ -9,15 +9,14 @@ from textual.widget import Widget
 from textual.widgets import Static
 
 from acre.core.semantic import SemanticDiffProvider, SemanticAnalysis
-from acre.models.comment import Comment
 from acre.models.diff import DiffFile, DiffHunk, DiffLine, DiffSet, LineType
-from acre.models.review import ReviewSession
+from acre.models.ocr_adapter import AcreSession, CommentView
 
 
 class CommentAction(Message):
     """Message for comment actions (edit/delete)."""
 
-    def __init__(self, action: str, comment: Comment):
+    def __init__(self, action: str, comment: CommentView):
         super().__init__()
         self.action = action  # "edit" or "delete"
         self.comment = comment
@@ -84,7 +83,7 @@ class DiffView(VerticalScroll):
     def __init__(
         self,
         diff_set: DiffSet,
-        session: ReviewSession,
+        session: AcreSession,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -387,7 +386,8 @@ class DiffView(VerticalScroll):
                         "issue": "red",
                         "praise": "green",
                     }
-                    bar_color = bar_colors.get(comment.category.value, "yellow")
+                    # CommentView.category returns string, not enum
+                    bar_color = bar_colors.get(comment.category, "yellow")
                     comment_bar = f"[{bar_color}]┃[/{bar_color}]"
                     break
 
@@ -415,16 +415,16 @@ class DiffView(VerticalScroll):
             else:
                 return f"{comment_bar}[dim]{line_no_str}[/dim] {prefix}{content}"
 
-    def _format_inline_comment(self, comment: Comment) -> str:
+    def _format_inline_comment(self, comment: CommentView) -> str:
         """Format an inline comment for display."""
         category_colors = {
             "note": "blue",
             "suggestion": "cyan",
             "issue": "red",
             "praise": "green",
-            "ai_analysis": "magenta",
         }
-        color = category_colors.get(comment.category.value, "yellow")
+        # CommentView.category returns string, not enum
+        color = category_colors.get(comment.category, "yellow")
 
         # AI comments get a cyan tint
         if comment.is_ai:
@@ -449,10 +449,11 @@ class DiffView(VerticalScroll):
 
         # Format: ┃ [CATEGORY] location (author): content (edit: e | delete: x)
         # Bar at very beginning of line
+        category_label = comment.category.upper()
         lines = [
             f"[{color}]┃[/{color}]     "
             f"{bg_start}"
-            f"[bold {color}][{comment.category.label}][/bold {color}] "
+            f"[bold {color}][{category_label}][/bold {color}] "
             f"[{color}]{location}[/{color}] "
             f"{author_badge}"
             f"{escaped_content} "
@@ -498,7 +499,7 @@ class DiffView(VerticalScroll):
         """Get the current line index within the file."""
         return self._current_line_index
 
-    def get_comment_at_cursor(self) -> Comment | None:
+    def get_comment_at_cursor(self) -> CommentView | None:
         """Get the comment at the current cursor position, if any.
 
         First checks if a comment is selected (via n/N navigation), then
@@ -703,7 +704,7 @@ class DiffView(VerticalScroll):
                 self.refresh_current_file()
                 break
 
-    def _scroll_to_comment(self, comment: Comment) -> None:
+    def _scroll_to_comment(self, comment: CommentView) -> None:
         """Scroll to show a comment, handling file-level comments."""
         if comment.line_no:
             self.scroll_to_line(comment.line_no)

@@ -6,14 +6,13 @@ from textual.containers import VerticalScroll
 from textual.message import Message
 from textual.widgets import Static
 
-from acre.models.comment import Comment
-from acre.models.review import ReviewSession
+from acre.models.ocr_adapter import AcreSession, CommentView
 
 
 class CommentSelected(Message):
     """Message sent when a comment is selected in the panel."""
 
-    def __init__(self, comment: Comment):
+    def __init__(self, comment: CommentView):
         super().__init__()
         self.comment = comment
 
@@ -64,10 +63,10 @@ class CommentPanel(VerticalScroll):
     }
     """
 
-    def __init__(self, session: ReviewSession, **kwargs):
+    def __init__(self, session: AcreSession, **kwargs):
         super().__init__(**kwargs)
         self.session = session
-        self._comments_by_id: dict[str, Comment] = {}
+        self._comments_by_id: dict[str, CommentView] = {}
         self._selected_comment_id: str | None = None
         self._widget_counter = 0  # For unique widget IDs
 
@@ -97,9 +96,9 @@ class CommentPanel(VerticalScroll):
                 "suggestion": "cyan",
                 "issue": "red",
                 "praise": "green",
-                "ai_analysis": "magenta",
             }
-            color = category_colors.get(comment.category.value, "white")
+            # CommentView.category returns string, not enum
+            color = category_colors.get(comment.category, "white")
 
             # AI comments get a cyan tint
             if comment.is_ai:
@@ -118,8 +117,10 @@ class CommentPanel(VerticalScroll):
 
             # Format the comment
             content = rich_escape(comment.content)
+            # CommentView.category is a string; convert to uppercase for display
+            category_label = comment.category.upper()
             markup = (
-                f"[{color}]{i}. [{comment.category.label}][/{color}] {author_badge}\n"
+                f"[{color}]{i}. [{category_label}][/{color}] {author_badge}\n"
                 f"[dim]{location}[/dim]\n"
                 f"{content}"
             )

@@ -6,8 +6,7 @@ import click
 
 from acre.app import AcreApp
 from acre.core.diff_source import get_diff_source
-from acre.core.session import get_session_path, load_session, save_session
-from acre.models.review import ReviewSession
+from acre.models.ocr_adapter import AcreSession, get_session_path
 
 
 @click.command()
@@ -25,6 +24,13 @@ from acre.models.review import ReviewSession
 )
 @click.option("--semantic", is_flag=True, help="Enable semantic diff mode (AST-based)")
 @click.option("--new", is_flag=True, help="Start a new session (ignore existing)")
+@click.option(
+    "--format",
+    "-f",
+    type=click.Choice(["xml", "yaml", "json"]),
+    default="xml",
+    help="Review file format (default: xml)",
+)
 def cli(
     staged: bool,
     branch: str | None,
@@ -33,23 +39,25 @@ def cli(
     repo: Path,
     semantic: bool,
     new: bool,
+    format: str,
 ):
     """acre - Agentic Code Review TUI.
 
     Review code changes with vim keybindings, add structured comments,
-    and collaborate with AI via the .acre-review.yaml file.
+    and collaborate with AI via the .opencodereview.xml file.
 
-    All session state is persisted in .acre-review.yaml in the repo root.
-    Edit this file with Claude or other LLMs to add comments and responses.
+    Uses the OpenCodeReview specification for portable review data.
+    Edit the review file with Claude or other LLMs to add comments and responses.
 
     Examples:
 
-        acre                       # Uncommitted changes (default)
+        acre                       # Uncommitted changes (XML format)
         acre --staged              # Only staged changes
         acre --branch main         # Changes vs main branch
         acre --commit abc123       # Specific commit
         acre --pr 42               # GitHub PR #42
         acre --new                 # Force new session
+        acre --format yaml         # Use YAML format instead of XML
     """
     repo_path = repo.resolve()
 
@@ -91,18 +99,11 @@ def cli(
 
     # Check for existing session file
     session = None
-
-    # Create a temporary session to compute the expected file path
-    temp_session = ReviewSession(
-        repo_path=repo_path,
-        diff_source_type=source_type,
-        diff_source_ref=source_ref,
-    )
-    session_file = get_session_path(temp_session)
+    session_file = get_session_path(repo_path, source_type, source_ref, format)
 
     if session_file.exists() and not new:
         try:
-            session = load_session(session_file)
+            session = AcreSession.load(session_file, format=format)
             click.echo(f"Resuming session from {session.updated_at.strftime('%Y-%m-%d %H:%M')}")
             click.echo(f"  {session.total_comments} comments, {session.reviewed_count}/{session.total_files} reviewed")
             click.echo(f"  (use --new to start fresh)")
@@ -113,19 +114,20 @@ def cli(
 
     # Create new session if needed
     if session is None:
-        session = ReviewSession(
+        session = AcreSession.new(
             repo_path=repo_path,
             diff_source_type=source_type,
             diff_source_ref=source_ref,
+            format=format,
         )
         session.init_files([f.path for f in diff_set.files])
 
-    # Run app (auto-saves to .acre-review.yaml on changes)
+    # Run app
     app = AcreApp(diff_set=diff_set, session=session, semantic_mode=semantic)
     app.run()
 
     # Always save on exit to ensure correct format
-    app.save_session_with_context()
+    app.save_session()
 
 
 if __name__ == "__main__":
