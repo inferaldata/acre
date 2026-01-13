@@ -1,0 +1,25 @@
+// acre-demo.kdl
+// Zellij layout for acre demo recording
+// Uses tabs instead of panes for full screen real estate
+
+keybinds clear-defaults=true {
+    shared {
+        bind "Ctrl a" { GoToTab 1; SwitchToMode "Normal"; }
+        bind "Ctrl b" { GoToTab 2; SwitchToMode "Normal"; }
+    }
+}
+
+layout {
+    tab name="claude" focus=true {
+        pane size=1 borderless=true {
+            plugin location="tab-bar"
+        }
+        pane
+    }
+    tab name="acre" {
+        pane size=1 borderless=true {
+            plugin location="tab-bar"
+        }
+        pane
+    }
+}
