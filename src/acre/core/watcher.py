@@ -87,3 +87,80 @@ class SessionWatcher:
     def is_running(self) -> bool:
         """Check if the watcher is running."""
         return self._task is not None and not self._task.done()
+
+
+class DiffWatcher:
+    """Watches the repository for file changes to reload diff.
+
+    Triggers when any tracked file changes, to pick up new code changes.
+    """
+
+    def __init__(
+        self,
+        repo_path: Path,
+        on_change: Callable[[], None],
+        session_file: Path | None = None,
+        debounce_ms: int = 1000,
+    ):
+        """Initialize the watcher.
+
+        Args:
+            repo_path: Path to the repository root
+            on_change: Callback to invoke when files change
+            session_file: Session file to ignore (already watched separately)
+            debounce_ms: Debounce time in milliseconds
+        """
+        self.repo_path = repo_path
+        self.on_change = on_change
+        self.session_file = session_file
+        self.debounce_ms = debounce_ms
+        self._task: asyncio.Task | None = None
+        self._stop_event = asyncio.Event()
+
+    async def _watch_loop(self) -> None:
+        """Main watch loop."""
+        try:
+            async for changes in awatch(
+                self.repo_path,
+                debounce=self.debounce_ms,
+                stop_event=self._stop_event,
+                recursive=True,
+            ):
+                # Filter out session file and .git directory changes
+                relevant_changes = []
+                for change_type, changed_path in changes:
+                    path = Path(changed_path)
+                    # Skip .git directory
+                    if ".git" in path.parts:
+                        continue
+                    # Skip session file (watched separately)
+                    if self.session_file and path == self.session_file:
+                        continue
+                    # Skip hidden files
+                    if path.name.startswith("."):
+                        continue
+                    relevant_changes.append((change_type, changed_path))
+
+                if relevant_changes:
+                    self.on_change()
+
+        except asyncio.CancelledError:
+            pass
+
+    def start(self) -> None:
+        """Start watching the repository."""
+        if self._task is None or self._task.done():
+            self._stop_event.clear()
+            self._task = asyncio.create_task(self._watch_loop())
+
+    def stop(self) -> None:
+        """Stop watching."""
+        self._stop_event.set()
+        if self._task and not self._task.done():
+            self._task.cancel()
+        self._task = None
+
+    @property
+    def is_running(self) -> bool:
+        """Check if the watcher is running."""
+        return self._task is not None and not self._task.done()

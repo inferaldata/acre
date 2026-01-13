@@ -4,8 +4,9 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import Footer, Header
 
+from acre.core.diff_source import get_diff_source
 from acre.core.session import get_session_file_path, load_session, save_session
-from acre.core.watcher import SessionWatcher
+from acre.core.watcher import DiffWatcher, SessionWatcher
 from acre.models.diff import DiffSet
 from acre.models.review import ReviewSession
 from acre.screens.help import HelpScreen
@@ -40,6 +41,7 @@ class AcreApp(App):
         self.session = session
         self.semantic_mode = semantic_mode
         self._watcher: SessionWatcher | None = None
+        self._diff_watcher: DiffWatcher | None = None
         self._diff_context = self._generate_diff_context()
 
     def _generate_diff_context(self) -> str:
@@ -65,13 +67,22 @@ class AcreApp(App):
 
     def on_mount(self) -> None:
         """Called when app is mounted."""
-        # Start file watcher
+        # Start session file watcher
         session_path = get_session_file_path(self.session)
         self._watcher = SessionWatcher(
             session_path=session_path,
             on_change=self._on_session_file_changed,
         )
         self._watcher.start()
+
+        # Start diff watcher for live diff sources (not commit or PR)
+        if self.session.diff_source_type not in ("commit", "pr"):
+            self._diff_watcher = DiffWatcher(
+                repo_path=self.session.repo_path,
+                on_change=self._on_diff_changed,
+                session_file=session_path,
+            )
+            self._diff_watcher.start()
 
         # Push main screen
         self.push_screen(
@@ -86,6 +97,10 @@ class AcreApp(App):
         """Handle external session file changes."""
         # Schedule the reload - use call_later since we're in an async task, not a thread
         self.call_later(self._reload_session)
+
+    def _on_diff_changed(self) -> None:
+        """Handle repository file changes - reload the diff."""
+        self.call_later(self._reload_diff_and_refresh)
 
     def _reload_session(self) -> None:
         """Reload the session from disk and refresh the UI."""
@@ -124,9 +139,14 @@ class AcreApp(App):
                     # New file state
                     self.session.files[file_path] = new_state
 
+            # Reload the diff to pick up any new changes
+            self._reload_diff()
+
             # Refresh the main screen
             main_screen = self.screen
             if isinstance(main_screen, MainScreen):
+                main_screen.diff_view.diff_set = self.diff_set
+                main_screen.file_list.diff_set = self.diff_set
                 main_screen.diff_view.refresh_current_file()
                 main_screen.file_list._build_tree()
                 main_screen.file_list.root.expand()
@@ -137,6 +157,36 @@ class AcreApp(App):
 
         except Exception as e:
             self.notify(f"Failed to reload session: {e}", severity="error")
+
+    def _reload_diff(self) -> None:
+        """Reload the diff from the repository."""
+        try:
+            source = get_diff_source(
+                repo_path=self.session.repo_path,
+                staged=(self.session.diff_source_type == "staged"),
+                branch=(self.session.diff_source_ref if self.session.diff_source_type == "branch" else None),
+                commit=(self.session.diff_source_ref if self.session.diff_source_type == "commit" else None),
+                pr=(int(self.session.diff_source_ref) if self.session.diff_source_type == "pr" else None),
+            )
+            self.diff_set = source.get_diff()
+            self._diff_context = self._generate_diff_context()
+        except Exception as e:
+            self.notify(f"Failed to reload diff: {e}", severity="warning")
+
+    def _reload_diff_and_refresh(self) -> None:
+        """Reload the diff and refresh the UI."""
+        self._reload_diff()
+
+        # Refresh the main screen with new diff
+        main_screen = self.screen
+        if isinstance(main_screen, MainScreen):
+            main_screen.diff_view.diff_set = self.diff_set
+            main_screen.file_list.diff_set = self.diff_set
+            main_screen.diff_view.refresh_current_file()
+            main_screen.file_list._build_tree()
+            main_screen.file_list.root.expand()
+
+        self.notify("Diff reloaded")
 
     def save_session_with_context(self) -> None:
         """Save the session with diff context for LLM."""
@@ -153,3 +203,5 @@ class AcreApp(App):
         """Called when app is unmounted."""
         if self._watcher:
             self._watcher.stop()
+        if self._diff_watcher:
+            self._diff_watcher.stop()
