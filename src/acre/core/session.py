@@ -231,7 +231,7 @@ def session_to_dict(session: ReviewSession) -> dict:
                         "new_start": rh.new_start,
                         "new_count": rh.new_count,
                         "header": rh.header,
-                        "lines_preview": LiteralStr(rh.lines_preview) if rh.lines_preview else "",
+                        "lines_preview": LiteralStr(rh.lines_preview + "\n") if rh.lines_preview else "",
                         "resolved_at": rh.resolved_at.isoformat(),
                         "resolved_by": rh.resolved_by,
                     }
@@ -317,7 +317,7 @@ def session_from_dict(data: dict, repo_path: Path) -> ReviewSession:
                     new_start=rh_data["new_start"],
                     new_count=rh_data["new_count"],
                     header=rh_data.get("header", ""),
-                    lines_preview=rh_data.get("lines_preview", ""),
+                    lines_preview=rh_data.get("lines_preview", "").rstrip("\n"),
                     resolved_at=resolved_at,
                     resolved_by=rh_data.get("resolved_by", "human"),
                 )
