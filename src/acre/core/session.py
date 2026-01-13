@@ -152,12 +152,22 @@ CATEGORIES EXPLAINED
 - praise: Positive feedback on good code
 - ai_analysis: In-depth AI analysis (complexity, patterns, etc.)
 
+RESOLVED HUNKS
+--------------
+
+Each file may have a resolved_hunks list containing hunks the reviewer has
+marked as "resolved" (reviewed and hidden from the diff view). These hunks
+are intentionally excluded from review focus.
+
+DO NOT modify resolved_hunks - this is managed by the TUI.
+
 IMPORTANT
 ---------
 
 - Keep the YAML valid - the TUI will fail to reload if syntax is broken
 - The id, created_at, updated_at fields are auto-generated - omit them
-- Line numbers refer to the NEW file (after changes), unless is_deleted_line=true"""
+- Line numbers refer to the NEW file (after changes), unless is_deleted_line=true
+- Do not modify resolved_hunks - it tracks which hunks the reviewer has dismissed"""
 
 
 def get_session_path(session: ReviewSession) -> Path:
