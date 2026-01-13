@@ -27,7 +27,7 @@ You navigate diffs with vim keybindings. You add comments. In another terminal, 
 
 ## How It Works
 
-Your review session is stored in `.acre-review.yaml` - a file designed for both you and Claude to read and edit. The file contains the diff, your comments, and Claude's responses. When either of you saves changes, acre reloads instantly.
+Your review session is stored in `.opencodereview.xml` using the [OpenCodeReview](https://github.com/opencodereview-org/opencodereview) specification - a portable format designed for both humans and AI to read and edit. The file contains the diff, your comments, and Claude's responses. When either of you saves changes, acre reloads instantly.
 
 ## Quick Start
 
@@ -37,7 +37,7 @@ uv sync
 uv run acre
 ```
 
-That's it. acre reviews your uncommitted changes and creates `.acre-review.yaml` in your repo root.
+That's it. acre reviews your uncommitted changes and creates `.opencodereview.xml` in your repo root.
 
 ## Usage
 
@@ -100,7 +100,7 @@ When adding a comment, choose a category:
 
 Here's where acre gets interesting.
 
-The `.acre-review.yaml` file is designed to be read and written by LLMs. It includes:
+The `.opencodereview.xml` file is designed to be read and written by LLMs. It includes:
 
 1. **Instructions** for Claude on how to participate
 2. **Diff context** so Claude can see what changed
@@ -109,7 +109,7 @@ The `.acre-review.yaml` file is designed to be read and written by LLMs. It incl
 ### Workflow
 
 1. Run `acre` and add some comments
-2. In another terminal: `cat .acre-review.yaml | claude "Review this and respond to my comments"`
+2. In another terminal: `cat .opencodereview.xml | claude "Review this and respond to my comments"`
 3. Claude edits the file, adding `llm_response` to your comments
 4. acre hot-reloads - Claude's responses appear inline!
 
@@ -153,7 +153,7 @@ Each comment includes the `context` field with the relevant hunk, so Claude has 
 
 **Comment navigation**: Use `n`/`N` to jump between comments. Works even for file-level comments at the top.
 
-**Hot reload**: Edit `.acre-review.yaml` externally (with Claude, vim, whatever). acre picks up changes automatically.
+**Hot reload**: Edit `.opencodereview.xml` externally (with Claude, vim, whatever). acre picks up changes automatically.
 
 **Session persistence**: Your session is tied to the diff source. `acre --branch main` and `acre --staged` maintain separate sessions.
 
@@ -168,6 +168,7 @@ uv run acre
 
 ## Built With
 
+- [OpenCodeReview](https://github.com/opencodereview-org/opencodereview) - Code review specification
 - [Textual](https://textual.textualize.io/) - The TUI framework
 - [Rich](https://rich.readthedocs.io/) - Terminal formatting
 - [Click](https://click.palletsprojects.com/) - CLI interface
