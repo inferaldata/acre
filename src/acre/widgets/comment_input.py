@@ -42,6 +42,7 @@ class CommentInput(Widget):
     BINDINGS = [
         Binding("escape", "cancel", "Cancel", show=False),
         Binding("ctrl+enter", "submit", "Submit", show=False),
+        Binding("ctrl+s", "submit", "Submit", show=False),
     ]
 
     DEFAULT_CSS = """
@@ -168,11 +169,18 @@ class CommentInput(Widget):
             yield Button("Cancel", id="cancel-btn", variant="default")
             yield Button("Save (Ctrl+Enter)", id="submit-btn", variant="primary")
 
-        yield Static("Ctrl+Enter: save | Esc: cancel | Tab: navigate", id="action-hint")
+        yield Static("Ctrl+Enter/Ctrl+S: save | Esc: cancel | Tab: navigate", id="action-hint")
 
     def on_mount(self) -> None:
         """Focus the textarea when mounted."""
         self.query_one("#comment-textarea", TextArea).focus()
+
+    def on_key(self, event) -> None:
+        """Handle key events - catch Ctrl+S before TextArea consumes it."""
+        if event.key == "ctrl+s":
+            event.prevent_default()
+            event.stop()
+            self._submit_comment()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
